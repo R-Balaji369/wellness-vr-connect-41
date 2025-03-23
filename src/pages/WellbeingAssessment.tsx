@@ -5,11 +5,17 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 type Message = {
   role: "user" | "assistant";
   content: string;
 };
+
+// Initialize the Gemini API with your API key
+// Note: In a production environment, this should be stored securely
+const genAI = new GoogleGenerativeAI("AIzaSyD3kmkmribUP88DthwYt-o1Syvcc9m35pM");
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const WellbeingAssessment: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -17,37 +23,70 @@ const WellbeingAssessment: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [assessmentComplete, setAssessmentComplete] = useState(false);
   const [assessmentSummary, setAssessmentSummary] = useState("");
+  const [chatSession, setChatSession] = useState<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Simulated Gemini responses based on the chat script provided
-  const simulatedResponses = [
-    "Hi there! 👋 Welcome to Serapisuto! I'm here to help you check in with your overall well-being today.\n\nFirst, are you feeling physically okay? 👍 Are you experiencing any pain or physical discomfort? 🤔 Once we've touched on that, we can move on to checking in with your mental well-being. How are you feeling generally? 😊",
-    "Thank you for sharing that with me. 🙏 To get a better understanding of how you're doing, could you tell me a bit more about the following?\n\n• *Sleep:* How has your sleep been lately? Are you getting enough restful sleep? 😴\n• *Concentration:* Are you finding it hard to focus during the day? 🧠\n• *Mood:* How would you describe your mood over the past couple of weeks? 😊😔\n• *Stress:* Are you currently experiencing significant stress in any area of your life? 😟\n• *Energy:* How are your energy levels throughout the day? ⚡",
-    "Thanks for your responses. Based on what you've shared, I can provide some insights into your wellbeing. 🌟\n\nYou appear to be experiencing some challenges that might benefit from our therapeutic approach. The combination of AR/VR, aromatherapy, and music therapy could help address your specific needs.\n\nWould you like to proceed with a session or explore self-care options? 💭",
-    "To proceed with booking a session, please access the options below. You can explore available time slots, select your preferred address, and specify any allergies or sensitivities. 👇\n\n• *Book a Session* 🗓\n• *View Available Therapists* 🧑‍⚕️\n• *Learn More About the Therapy Process* ℹ️\n• *Contact Support* ❓\n\nRemember, these therapies offered by Serapisuto aren't just for mental health. They can also significantly enhance physical healing, whether you're recovering from an accident or dealing with chronic pain. The calming and restorative effects of AR/VR, aromatherapy, and music can aid in the body's natural healing processes. 🌟"
-  ];
-
-  const responseIndex = useRef(0);
-
-  // Initial welcome message when component mounts
+  // Initialize chat session when component mounts
   useEffect(() => {
-    setMessages([
-      {
-        role: "assistant",
-        content: simulatedResponses[0],
-      },
-    ]);
-  }, []);
+    const initChat = async () => {
+      try {
+        const session = model.startChat({
+          generationConfig: {
+            temperature: 1,
+            topP: 0.95,
+            topK: 40,
+            maxOutputTokens: 8192,
+          },
+          history: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: "you are an chat bot of an app called Serapisuto your duty is to ask some questions regarding mental health like how is your sleep, are you distracted and are you facing any other issue.\nthen after you have to analyze and tell the patent that he needs therapy or he can proceed with free treatment like self treatment or you have to book the session for treatment.\nyou have to communicate friendly with the patent\n",
+                },
+              ],
+            },
+            {
+              role: "model",
+              parts: [
+                {
+                  text: "Hi there! 👋 Welcome to Serapisuto! I'm here to help you check in with your overall well-being today.\n\nFirst, are you feeling physically okay? 👍 Are you experiencing any pain or physical discomfort? 🤔 Once we've touched on that, we can move on to checking in with your mental well-being. How are you feeling generally? 😊",
+                },
+              ],
+            },
+          ],
+        });
+        setChatSession(session);
+
+        // Set initial welcome message
+        setMessages([
+          {
+            role: "assistant",
+            content: "Hi there! 👋 Welcome to Serapisuto! I'm here to help you check in with your overall well-being today.\n\nFirst, are you feeling physically okay? 👍 Are you experiencing any pain or physical discomfort? 🤔 Once we've touched on that, we can move on to checking in with your mental well-being. How are you feeling generally? 😊",
+          },
+        ]);
+      } catch (error) {
+        console.error("Failed to initialize chat:", error);
+        toast({
+          title: "Error",
+          description: "Failed to initialize the assessment chat. Please try again.",
+          variant: "destructive",
+        });
+      }
+    };
+
+    initChat();
+  }, [toast]);
 
   // Auto-scroll to the bottom of messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSendMessage = () => {
-    if (!input.trim()) return;
+  const handleSendMessage = async () => {
+    if (!input.trim() || !chatSession) return;
 
     // Add user message
     const userMessage = { role: "user" as const, content: input };
@@ -55,23 +94,31 @@ const WellbeingAssessment: React.FC = () => {
     setInput("");
     setIsLoading(true);
 
-    // Simulate AI response with delay
-    setTimeout(() => {
-      responseIndex.current = (responseIndex.current + 1) % simulatedResponses.length;
+    try {
+      // Send message to Gemini API
+      const result = await chatSession.sendMessage(input.trim());
       const botResponse = {
         role: "assistant" as const,
-        content: simulatedResponses[responseIndex.current],
+        content: result.response.text(),
       };
       
       setMessages((prev) => [...prev, botResponse]);
-      setIsLoading(false);
 
       // After a few exchanges, consider the assessment complete
       if (messages.length > 5) {
         setAssessmentComplete(true);
         generateSummary();
       }
-    }, 1000);
+    } catch (error) {
+      console.error("Error sending message:", error);
+      toast({
+        title: "Error",
+        description: "Failed to get a response. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const generateSummary = () => {
